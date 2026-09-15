@@ -1,13 +1,17 @@
 {
-  "name": "phonegap-nfc",
-  "version": "1.2.0",
-  "description": "NFC 近场通信 Cordova 插件，支持 Android 和 iOS 平台的 NDEF 标签读写。",
+  "name": "cordova-plugin-nfc-t",
+  "version": "1.0.0",
+  "description": "NFC 近场通信 Cordova 插件，支持 Android 和 iOS 平台的 NDEF 标签读写（中文版）。",
   "cordova": {
     "id": "phonegap-nfc",
     "platforms": [
       "android",
       "ios"
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lanyangayang/cordova-plugin-nfc-t.git"
   },
   "keywords": [
     "nfc",
@@ -17,5 +21,7 @@
     "cordova",
     "cordova-android",
     "cordova-ios"
-  ]
+  ],
+  "author": "lanyangayang",
+  "license": "MIT"
 }
