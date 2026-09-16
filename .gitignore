@@ -13,5 +13,4 @@ npm-debug.log
 # Cordova
 platforms/
 plugins/
-www/
 *.tgz
