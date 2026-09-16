@@ -70,6 +70,7 @@ public class NfcPlugin extends CordovaPlugin {
     private Class<?> tagTechnologyClass;
 
     private static final String CHANNEL = "channel";
+    private static final String SET_DISABLED = "setDisabled";
 
     private static final String STATUS_NFC_OK = "NFC_OK";
     private static final String STATUS_NO_NFC = "NO_NFC";
@@ -82,6 +83,9 @@ public class NfcPlugin extends CordovaPlugin {
 
     private NdefMessage p2pMessage = null;
     private PendingIntent pendingIntent = null;
+
+    /** JS 层主动禁用标志：为 true 时 onResume 也不会启用前台分发 */
+    private boolean jsDisabled = false;
 
     private Intent savedIntent = null;
 
@@ -112,6 +116,27 @@ public class NfcPlugin extends CordovaPlugin {
         if (action.equalsIgnoreCase(DISABLE_READER_MODE)) {
             disableReaderMode(callbackContext);
             return true; // short circuit
+        }
+
+        // JS 层设置禁用标志：为 true 时 onResume 不会重新启用前台分发
+        // 这个 action 不依赖 NFC 状态
+        if (action.equalsIgnoreCase(SET_DISABLED)) {
+            try {
+                boolean disabled = data.getBoolean(0);
+                jsDisabled = disabled;
+                Log.d(TAG, "setDisabled: " + disabled);
+                if (disabled) {
+                    // 立即停止前台分发
+                    stopNfc();
+                    // 清空所有 filters 和 techLists，防止下次 startNfc 时又启用
+                    intentFilters.clear();
+                    techLists.clear();
+                }
+                callbackContext.success();
+            } catch (JSONException e) {
+                callbackContext.error("Invalid parameter");
+            }
+            return true;
         }
 
         if (!getNfcStatus().equals(STATUS_NFC_OK)) {
@@ -294,16 +319,29 @@ public class NfcPlugin extends CordovaPlugin {
     }
 
     private void removeNdef(CallbackContext callbackContext) {
+        Log.d(TAG, "removeNdef: before filterCount=" + intentFilters.size() + ", techListCount=" + techLists.size());
         removeTechList(new String[]{Ndef.class.getName()});
         removeTechList(new String[]{NdefFormatable.class.getName()});
-        // 移除通配的 NDEF_DISCOVERED filter
+        // 移除 registerNdef 添加的通配 NDEF_DISCOVERED filter（*/*）
+        // 注意：不能只按 action 匹配，因为 MIME 类型的 filter action 也是 NDEF_DISCOVERED
+        // 需要同时检查 action 是 NDEF_DISCOVERED 且 data type 是通配符 */*
         for (int i = intentFilters.size() - 1; i >= 0; i--) {
             IntentFilter f = intentFilters.get(i);
             if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(f.getAction(0))) {
-                intentFilters.remove(i);
-                break;
+                String dataType = null;
+                try {
+                    dataType = f.getDataType(0);
+                } catch (Exception e) {
+                    // 没有 data type，跳过
+                }
+                // 只移除通配符 filter，具体 MIME 类型的由 removeMimeType 负责
+                if ("*/*".equals(dataType)) {
+                    intentFilters.remove(i);
+                    break;
+                }
             }
         }
+        Log.d(TAG, "removeNdef: after filterCount=" + intentFilters.size() + ", techListCount=" + techLists.size());
         restartNfc();
         callbackContext.success();
     }
@@ -327,7 +365,9 @@ public class NfcPlugin extends CordovaPlugin {
 
     private void removeMimeType(JSONArray data, CallbackContext callbackContext) throws JSONException {
         String mimeType = data.getString(0);
+        Log.d(TAG, "removeMimeType: " + mimeType + ", before filterCount=" + intentFilters.size() + ", techListCount=" + techLists.size());
         removeIntentFilter(mimeType);
+        Log.d(TAG, "removeMimeType: after filterCount=" + intentFilters.size() + ", techListCount=" + techLists.size());
         restartNfc();
         callbackContext.success();
     }
@@ -568,6 +608,12 @@ public class NfcPlugin extends CordovaPlugin {
     private void startNfc() {
         createPendingIntent(); // onResume can call startNfc before execute
 
+        // JS 层主动禁用了，onResume 时也不要启用前台分发
+        if (jsDisabled) {
+            Log.d(TAG, "startNfc: skipped (jsDisabled=true)");
+            return;
+        }
+
         getActivity().runOnUiThread(() -> {
             NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(getActivity());
 
@@ -578,7 +624,10 @@ public class NfcPlugin extends CordovaPlugin {
                     // don't start NFC unless some intent filters or tech lists have been added,
                     // because empty lists act as wildcards and receives ALL scan events
                     if (intentFilters.length > 0 || techLists.length > 0) {
+                        Log.d(TAG, "startNfc: enableForegroundDispatch, filters=" + intentFilters.length + ", techLists=" + techLists.length);
                         nfcAdapter.enableForegroundDispatch(getActivity(), getPendingIntent(), intentFilters, techLists);
+                    } else {
+                        Log.d(TAG, "startNfc: filters and techLists empty, NOT enabling foreground dispatch");
                     }
 
                     if (p2pMessage != null) {
@@ -601,11 +650,15 @@ public class NfcPlugin extends CordovaPlugin {
 
             if (nfcAdapter != null) {
                 try {
+                    Log.d(TAG, "stopNfc: calling disableForegroundDispatch");
                     nfcAdapter.disableForegroundDispatch(getActivity());
+                    Log.d(TAG, "stopNfc: disableForegroundDispatch called successfully");
                 } catch (IllegalStateException e) {
                     // issue 125 - user exits app with back button while nfc
                     Log.w(TAG, "Illegal State Exception stopping NFC. Assuming application is terminating.");
                 }
+            } else {
+                Log.d(TAG, "stopNfc: nfcAdapter is null, skipping disable");
             }
         });
     }
@@ -867,7 +920,7 @@ public class NfcPlugin extends CordovaPlugin {
 
     @Override
     public void onPause(boolean multitasking) {
-        Log.d(TAG, "onPause " + getIntent());
+        Log.d(TAG, "onPause multitasking=" + multitasking + ", intent=" + getIntent());
         super.onPause(multitasking);
         if (multitasking) {
             // nfc can't run in background
@@ -877,7 +930,7 @@ public class NfcPlugin extends CordovaPlugin {
 
     @Override
     public void onResume(boolean multitasking) {
-        Log.d(TAG, "onResume " + getIntent());
+        Log.d(TAG, "onResume multitasking=" + multitasking + ", intent=" + getIntent() + ", filterCount=" + intentFilters.size() + ", techListCount=" + techLists.size());
         super.onResume(multitasking);
         startNfc();
     }
