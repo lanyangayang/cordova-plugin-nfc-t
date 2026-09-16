@@ -35,7 +35,7 @@ import android.os.Bundle;
 import android.os.Parcelable;
 import android.util.Log;
 
-public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCompleteCallback {
+public class NfcPlugin extends CordovaPlugin {
     private static final String REGISTER_MIME_TYPE = "registerMimeType";
     private static final String REMOVE_MIME_TYPE = "removeMimeType";
     private static final String REGISTER_NDEF = "registerNdef";
@@ -279,12 +279,31 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
 
     private void registerNdef(CallbackContext callbackContext) {
         addTechList(new String[]{Ndef.class.getName()});
+        addTechList(new String[]{NdefFormatable.class.getName()});
+        // 添加 ACTION_NDEF_DISCOVERED 通配 filter，确保能收到所有 NDEF 标签
+        // （registerMimeType 会加具体 MIME，但 registerNdef 本身没加 filter，导致前台分发不生效）
+        try {
+            IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+            filter.addDataType("*/*");
+            intentFilters.add(filter);
+        } catch (IntentFilter.MalformedMimeTypeException e) {
+            Log.w(TAG, "Failed to add NDEF wildcard filter", e);
+        }
         restartNfc();
         callbackContext.success();
     }
 
     private void removeNdef(CallbackContext callbackContext) {
         removeTechList(new String[]{Ndef.class.getName()});
+        removeTechList(new String[]{NdefFormatable.class.getName()});
+        // 移除通配的 NDEF_DISCOVERED filter
+        for (int i = intentFilters.size() - 1; i >= 0; i--) {
+            IntentFilter f = intentFilters.get(i);
+            if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(f.getAction(0))) {
+                intentFilters.remove(i);
+                break;
+            }
+        }
         restartNfc();
         callbackContext.success();
     }
@@ -376,11 +395,19 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
                     }
                 }
             } catch (FormatException e) {
+                Log.e(TAG, "write NDEF FormatException: " + e.getMessage());
                 callbackContext.error(e.getMessage());
             } catch (TagLostException e) {
+                Log.e(TAG, "write NDEF TagLostException: " + e.getMessage());
                 callbackContext.error(e.getMessage());
             } catch (IOException e) {
-                callbackContext.error(e.getMessage());
+                Log.e(TAG, "write NDEF IOException: " + e.getMessage());
+                e.printStackTrace();
+                callbackContext.error("IOException: " + e.getMessage());
+            } catch (Exception e) {
+                Log.e(TAG, "write NDEF Exception: " + e.getClass().getName() + " - " + e.getMessage());
+                e.printStackTrace();
+                callbackContext.error(e.getClass().getName() + ": " + e.getMessage());
             }
         });
     }
@@ -483,7 +510,15 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
             Activity activity = getActivity();
             Intent intent = new Intent(activity, activity.getClass());
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            pendingIntent = PendingIntent.getActivity(activity, 0, intent, 0);
+            // Android 12+ (API 31+) 要求 PendingIntent 必须显式指定 IMMUTABLE 或 MUTABLE
+            // NFC 前台分发需要在 PendingIntent 中填充 tag 等 extra 数据，所以必须用 MUTABLE
+            int flags;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                flags = android.app.PendingIntent.FLAG_MUTABLE;
+            } else {
+                flags = 0;
+            }
+            pendingIntent = PendingIntent.getActivity(activity, 0, intent, flags);
         }
     }
 
@@ -547,7 +582,7 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
                     }
 
                     if (p2pMessage != null) {
-                        nfcAdapter.setNdefPushMessage(p2pMessage, getActivity());
+                        setNdefPushMessageReflective(nfcAdapter, p2pMessage);
                     }
                 } catch (IllegalStateException e) {
                     // issue 110 - user exits app with home button while nfc is initializing
@@ -582,19 +617,22 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
 
             if (nfcAdapter == null) {
                 callbackContext.error(STATUS_NO_NFC);
-            } else if (!nfcAdapter.isNdefPushEnabled()) {
+            } else if (!isNdefPushEnabledReflective(nfcAdapter)) {
                 callbackContext.error(STATUS_NDEF_PUSH_DISABLED);
             } else {
-                nfcAdapter.setOnNdefPushCompleteCallback(NfcPlugin.this, getActivity());
+                // Android Beam 在 Android 10+ 已废弃，这里用反射调用以兼容低版本
                 try {
-                    nfcAdapter.setBeamPushUris(uris, getActivity());
+                    Method setBeamMethod = nfcAdapter.getClass().getMethod("setBeamPushUris", Uri[].class, Activity.class);
+                    setBeamMethod.invoke(nfcAdapter, uris, getActivity());
 
                     PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
                     result.setKeepCallback(true);
                     handoverCallback = callbackContext;
                     callbackContext.sendPluginResult(result);
 
-                } catch (IllegalArgumentException e) {
+                } catch (NoSuchMethodException e) {
+                    callbackContext.error("Android Beam is not supported on this device");
+                } catch (IllegalAccessException | InvocationTargetException e) {
                     callbackContext.error(e.getMessage());
                 }
             }
@@ -608,11 +646,10 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
 
             if (nfcAdapter == null) {
                 callbackContext.error(STATUS_NO_NFC);
-            } else if (!nfcAdapter.isNdefPushEnabled()) {
+            } else if (!isNdefPushEnabledReflective(nfcAdapter)) {
                 callbackContext.error(STATUS_NDEF_PUSH_DISABLED);
             } else {
-                nfcAdapter.setNdefPushMessage(p2pMessage, getActivity());
-                nfcAdapter.setOnNdefPushCompleteCallback(NfcPlugin.this, getActivity());
+                setNdefPushMessageReflective(nfcAdapter, p2pMessage);
 
                 PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
                 result.setKeepCallback(true);
@@ -628,7 +665,7 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
             NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(getActivity());
 
             if (nfcAdapter != null) {
-                nfcAdapter.setNdefPushMessage(null, getActivity());
+                setNdefPushMessageReflective(nfcAdapter, null);
             }
 
         });
@@ -640,10 +677,36 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
             NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(getActivity());
 
             if (nfcAdapter != null) {
-                nfcAdapter.setBeamPushUris(null, getActivity());
+                try {
+                    Method setBeamMethod = nfcAdapter.getClass().getMethod("setBeamPushUris", Uri[].class, Activity.class);
+                    setBeamMethod.invoke(nfcAdapter, (Uri[]) null, getActivity());
+                } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+                    // 高版本 Android 不支持，忽略
+                }
             }
 
         });
+    }
+
+    // ==================== 反射调用 Android Beam API（兼容高版本） ====================
+
+    private void setNdefPushMessageReflective(NfcAdapter nfcAdapter, NdefMessage message) {
+        try {
+            Method method = nfcAdapter.getClass().getMethod("setNdefPushMessage", NdefMessage.class, Activity.class);
+            method.invoke(nfcAdapter, message, getActivity());
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+            // Android 10+ 已移除该 API，忽略即可
+        }
+    }
+
+    private boolean isNdefPushEnabledReflective(NfcAdapter nfcAdapter) {
+        try {
+            Method method = nfcAdapter.getClass().getMethod("isNdefPushEnabled");
+            return (boolean) method.invoke(nfcAdapter);
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+            // 高版本不支持，视为不可用
+            return false;
+        }
     }
 
     private void addToTechList(String[] techs) {
@@ -692,10 +755,15 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
 
     private void parseMessage() {
         cordova.getThreadPool().execute(() -> {
-            Log.d(TAG, "parseMessage " + getIntent());
-            Intent intent = getIntent();
+            // 使用 savedIntent（onNewIntent 里保存的），而不是 getIntent()
+            // 避免 onResume/onPause 时序导致 Intent 被清空
+            Intent intent = savedIntent != null ? savedIntent : getIntent();
+            Log.d(TAG, "parseMessage " + intent);
             String action = intent.getAction();
             Log.d(TAG, "action " + action);
+            if (action == null) {
+                Log.d(TAG, "savedIntent=" + savedIntent + ", getIntent()=" + getIntent());
+            }
             if (action == null) {
                 return;
             }
@@ -835,7 +903,7 @@ public class NfcPlugin extends CordovaPlugin implements NfcAdapter.OnNdefPushCom
         getActivity().setIntent(intent);
     }
 
-    @Override
+    // 保留方法体，但移除 @Override（Android 10+ OnNdefPushCompleteCallback 已废弃）
     public void onNdefPushComplete(NfcEvent event) {
 
         // handover (beam) take precedence over share tag (ndef push)
