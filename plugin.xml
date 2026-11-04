@@ -1,15 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <plugin
-    xmlns="http://www.phonegap.com/ns/plugins/1.0"
+    xmlns="http://apache.org/cordova/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-plugin-nfc-t"
-    version="1.0.1">
+    version="1.0.2">
 
     <name>NFC</name>
 
     <description>Near Field Communication (NFC) Plugin. Read and write NDEF messages to NFC tags and share NDEF messages with peers.</description>
 
-    <keywords>nfc, NFC, NDEF</keywords>
+    <license>MIT</license>
+
+    <keywords>nfc, NFC, NDEF, ecosystem:cordova, cordova-android, cordova-ios</keywords>
+
+    <engines>
+        <engine name="cordova-android" version=">=10.0.0" />
+        <engine name="cordova-ios" version=">=6.0.0" />
+    </engines>
 
     <platform name="android">
         <js-module src="www/phonegap-nfc.js" name="NFC">
@@ -28,7 +35,7 @@
         <source-file src="src/android/src/com/chariotsolutions/nfc/plugin/Util.java"
             target-dir="src/com/chariotsolutions/nfc/plugin"/>
 
-        <config-file target="AndroidManifest.xml" parent="/manifest">
+        <config-file target="AndroidManifest.xml" parent="/*">
             <uses-permission android:name="android.permission.NFC"/>
             <uses-feature android:name="android.hardware.nfc" android:required="false"/>
         </config-file>
@@ -49,16 +56,16 @@
         <config-file parent="com.apple.developer.nfc.readersession.formats" platform="ios" target="*-Debug.plist">
             <array>
                 <string>NDEF</string>
-                <string>TAG</string>  
+                <string>TAG</string>
             </array>
         </config-file>
         <config-file parent="com.apple.developer.nfc.readersession.formats" platform="ios" target="*-Release.plist">
             <array>
                 <string>NDEF</string>
-                <string>TAG</string>  
+                <string>TAG</string>
             </array>
         </config-file>
-        
+
         <header-file src="src/ios/NfcPlugin.h" />
         <source-file src="src/ios/NfcPlugin.m" />
 
@@ -69,6 +76,5 @@
             <string>$NFC_USAGE_DESCRIPTION</string>
         </config-file>
     </platform>
-
 
 </plugin>

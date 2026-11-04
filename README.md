@@ -7,12 +7,18 @@
 ## 安装
 
 ```bash
-# 方式一：从 GitHub 安装
-npm install github:lanyangayang/cordova-plugin-nfc-t
+# 从 npm 安装
+npm install cordova-plugin-nfc-t
+
+# 或从 GitHub 安装（等价）
+# npm install github:lanyangayang/cordova-plugin-nfc-t
 
 # Capacitor 项目安装后执行同步
 npx cap sync
 ```
+
+> **插件 id 是 `cordova-plugin-nfc-t`**（1.0.1 起）。早期版本曾用 `phonegap-nfc`，
+> 现在可与官方 `phonegap-nfc` 包共存，不会再互相覆盖。
 
 ---
 

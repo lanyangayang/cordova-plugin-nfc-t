@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-nfc-t",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "NFC Cordova 插件，支持 Android 和 iOS 平台的 NDEF 标签读写。",
   "cordova": {
     "id": "cordova-plugin-nfc-t",
@@ -13,6 +13,9 @@
     "type": "git",
     "url": "https://github.com/lanyangayang/cordova-plugin-nfc-t.git"
   },
+  "bugs": {
+    "url": "https://github.com/lanyangayang/cordova-plugin-nfc-t/issues"
+  },
   "keywords": [
     "nfc",
     "ndef",
@@ -23,5 +26,20 @@
     "cordova-ios"
   ],
   "author": "lanyangayang",
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "plugin.xml",
+    "src",
+    "www",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "cordovaDependencies": {
+      "1.0.0": {
+        "cordova-android": ">=10.0.0",
+        "cordova-ios": ">=6.0.0"
+      }
+    }
+  }
 }
